@@ -27,8 +27,8 @@ class MCPServerConfig(BaseModel):
     auth_type: AuthType = Field(default=AuthType.API_KEY, description="认证类型")
     auth_config: Dict[str, Any] = Field(default_factory=dict, description="认证配置")
     enabled: bool = Field(default=True, description="是否启用")
-    created_at: datetime = Field(default_factory=lambda: str(datetime.now()), description="创建时间")
-    updated_at: datetime = Field(default_factory=lambda: str(datetime.now()), description="更新时间")
+    created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
+    updated_at: datetime = Field(default_factory=datetime.now, description="更新时间")
 
     def update(self, **kwargs):
         for key, value in kwargs.items():

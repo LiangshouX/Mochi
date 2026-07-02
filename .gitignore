@@ -220,3 +220,7 @@ __marimo__/
 
 poetry.lock
 .idea
+.codegraph
+.specify
+specs
+.claude

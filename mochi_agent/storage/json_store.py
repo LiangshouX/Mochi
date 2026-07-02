@@ -5,8 +5,22 @@
 * Function  : JSON 文件存储实现
 """
 import json
-import fcntl
+import sys
 from json import JSONDecodeError
+
+# Cross-platform file locking
+if sys.platform == "win32":
+    import msvcrt
+    def _lock_file(f, exclusive=True):
+        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+    def _unlock_file(f):
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+else:
+    import fcntl
+    def _lock_file(f, exclusive=True):
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+    def _unlock_file(f):
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 from pathlib import Path
 from typing import Any, List, Dict
 
@@ -119,11 +133,11 @@ class ThreadSafeJSONStore(JSONStore):
 
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                _lock_file(f, exclusive=False)
                 try:
                     return json.load(f)
                 finally:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    _unlock_file(f)
         except Exception as e:
             logger.error(f"JSON 文件 {file_path} 解析错误: {e}")
             return default
@@ -134,11 +148,11 @@ class ThreadSafeJSONStore(JSONStore):
 
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                _lock_file(f, exclusive=True)
                 try:
                     json.dump(value, f, ensure_ascii=False, indent=2)
                 finally:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    _unlock_file(f)
         except Exception as e:
             logger.error(f"写入 JSON 文件 {file_path} 失败: {e}")
             raise

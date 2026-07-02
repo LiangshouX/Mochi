@@ -1,5 +1,5 @@
 [project]
-name = "mochi"
+name = "mochi_agent"
 version = "0.1.0"
 description = "Local Personal AI Assistant"
 authors = [
@@ -17,6 +17,15 @@ dependencies = [
     "requests>=2.31",
     "aiohttp>=3.9",
     "python-dotenv>=1.0",
+    "mcp>=1.0",
+    "rich>=13.0",
+    "prompt-toolkit>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
 ]
 
 

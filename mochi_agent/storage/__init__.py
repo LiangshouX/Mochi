@@ -7,4 +7,4 @@
 
 from mochi_agent.storage.json_store import JSONStore
 
-__all__ = JSONStore
+__all__ = ["JSONStore"]

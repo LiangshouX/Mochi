@@ -53,7 +53,7 @@ class LongTermMemory:
 
     def _save_all(self) -> None:
         """将所有记忆保存到存储"""
-        data = {key: memory.model_dump() for key, memory in self._memories.items()}
+        data = {key: memory.model_dump(mode='json') for key, memory in self._memories.items()}
         self.storage.set("memories", data)
 
     def set(
