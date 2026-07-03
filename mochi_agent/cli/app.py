@@ -11,12 +11,14 @@ from typing import Optional, List
 
 from rich.console import Console
 from rich.text import Text
-from rich.panel import Panel
-from rich.rule import Rule
-from prompt_toolkit import PromptSession
+from prompt_toolkit import Application
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
-from prompt_toolkit.formatted_text import ANSI
+from prompt_toolkit.layout import Layout, HSplit, Window
+from prompt_toolkit.layout.dimension import Dimension
+from prompt_toolkit.layout.controls import BufferControl
+from prompt_toolkit.layout.processors import BeforeInput
+from prompt_toolkit.buffer import Buffer
 
 from mochi_agent.agent.core import MochiAgent
 from mochi_agent.config import Config, ConfigManager
@@ -29,14 +31,8 @@ __version__ = "0.1.0"
 
 # ── Prompt Toolkit 样式 ──────────────────────────────────────────────────
 _PT_KHAKI = "#C8B896"  # 莫兰迪浅卡其色
-PT_STYLE = Style.from_dict({
-    "prompt": f"bold {_PT_KHAKI}",
-    "input": "#ffffff",
-    "continuation": f"{_PT_KHAKI}",
-})
 
 # ── Rich 样式常量 ────────────────────────────────────────────────────────
-BORDER_STYLE = _PT_KHAKI
 USER_STYLE = "dim white on #2a2a2a"
 BOT_STYLE = "cyan"
 ERROR_STYLE = "bold red"
@@ -66,20 +62,43 @@ class MochiREPL:
     def __init__(self, agent: MochiAgent):
         self.agent = agent
         self.console = Console()
-        self._build_prompt_session()
 
-    # ── Prompt Session 初始化 ─────────────────────────────────────────────
-    def _build_prompt_session(self):
-        """构建 prompt_toolkit 会话（多行输入 + 键绑定）"""
+    # ── 输入（基于 Application 的带边框输入区） ────────────────────────────
+    def _prompt(self) -> str:
+        """带莫兰迪卡其色实线边框的多行输入区（动态适配终端宽度）"""
+        # ── 样式 ──
+        style = Style.from_dict({
+            "input-text": "#ffffff",
+            "cursor": "bg:#ffffff #000000",
+        })
+
+        # ── 布局：上边框 ─ 输入区(≤8行) ─ 下边框 ──
+        # 用 Window(char=...) 填充整行，prompt_toolkit 自动处理宽度和重绘
+        border_top = Window(height=1, char="─", style=_PT_KHAKI)
+        border_bottom = Window(height=1, char="─", style=_PT_KHAKI)
+
+        buf = Buffer(multiline=True)
+
+        input_area = Window(
+            height=Dimension(min=1, max=8),
+            content=BufferControl(
+                buffer=buf,
+                input_processors=[
+                    BeforeInput(" > ", style="bold #55aa55"),
+                ],
+            ),
+        )
+
+        layout = Layout(HSplit([border_top, input_area, border_bottom]))
+
+        # ── 键绑定 ──
         kb = KeyBindings()
 
         @kb.add("enter")
         def _(event):
-            """Enter 发送；行尾 \\ + Enter 换行"""
             buffer = event.app.current_buffer
             text = buffer.text
             if text.rstrip().endswith("\\"):
-                # 移除尾部的 \，插入换行
                 buffer.delete_backward_char(1)
                 buffer.insert_text("\n")
             else:
@@ -87,51 +106,35 @@ class MochiREPL:
 
         @kb.add("escape", "enter")
         def _(event):
-            """Alt+Enter 强制换行"""
             event.app.current_buffer.insert_text("\n")
 
         @kb.add("c-c")
         def _(event):
-            """Ctrl+C 清空当前输入"""
             buffer = event.app.current_buffer
             if buffer.text:
                 buffer.reset()
             else:
                 raise KeyboardInterrupt
 
-        self.prompt_session = PromptSession(
-            style=PT_STYLE,
+        # ── 构建 Application ──
+        app = Application(
+            layout=layout,
             key_bindings=kb,
-            multiline=True,
-            wrap_lines=True,
+            style=style,
+            full_screen=False,
+            erase_when_done=True,
         )
 
-    # ── 输入 ──────────────────────────────────────────────────────────────
-    def _get_input(self) -> str:
-        """获取用户输入（带绿色 > 提示符）"""
+        # accept_handler 在 app 创建之后设置，确保 app 可用
+        buf.accept_handler = lambda buffer: app.exit(result=buffer.text)
+
         try:
-            text = self.prompt_session.prompt(
-                ANSI("\033[1;32m > \033[0m"),
-            )
-            return text.strip()
+            result = app.run()
+            return (result or "").strip()
         except KeyboardInterrupt:
-            return ""
+            raise
         except EOFError:
             raise
-
-    # ── 渲染辅助 ─────────────────────────────────────────────────────────
-    def _border_line(self):
-        """打印卡其色分隔线（动态适配终端宽度）"""
-        w = self.console.width or 80
-        self.console.print(Text("─" * w, style=BORDER_STYLE))
-
-    def _input_border_top(self):
-        """输入区上边框"""
-        self._border_line()
-
-    def _input_border_bottom(self):
-        """输入区下边框"""
-        self._border_line()
 
     def _print_user_block(self, text: str):
         """用户输入 — 浅灰色背景块"""
@@ -170,16 +173,13 @@ class MochiREPL:
         self._print_banner()
 
         while True:
-            # ── 输入区：上边框 + 输入 + 下边框 ──
-            self._input_border_top()
+            # ── 输入区（边框 + 多行输入，Application 内自动渲染） ──
             try:
-                user_input = self._get_input()
+                user_input = self._prompt()
             except (EOFError, KeyboardInterrupt):
-                self._input_border_bottom()
                 self.console.print()
                 self.console.print(Text("  再见！👋", style="bold white"))
                 break
-            self._input_border_bottom()
 
             if not user_input:
                 continue
