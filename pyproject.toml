@@ -1,6 +1,6 @@
 [project]
 name = "mochi-assistant"
-version = "0.1.0"
+version = "0.1.3"
 description = "Mochi — 本地运行的个人 AI 助手，基于 LangGraph 构建"
 authors = [
     {name = "LiangshouX", email = "xiaoliangshou.bit@gmail.com"}
