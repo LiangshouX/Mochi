@@ -7,7 +7,7 @@
 import subprocess
 from typing import Optional
 
-from mochi_agent.logging_config import get_logger
+from mochi_assistant.logging_config import get_logger
 
 logger = get_logger(__name__)
 

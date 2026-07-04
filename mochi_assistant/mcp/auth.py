@@ -10,8 +10,8 @@ from typing import Any, Dict, Optional
 import requests
 from requests.auth import AuthBase
 
-from mochi_agent.logging_config import get_logger
-from mochi_agent.mcp.config import AuthType
+from mochi_assistant.logging_config import get_logger
+from mochi_assistant.mcp.config import AuthType
 
 logger = get_logger(__name__)
 

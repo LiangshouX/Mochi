@@ -5,6 +5,6 @@
 * Function  : L1 基础服务层，Agent 数据存储相关
 """
 
-from mochi_agent.storage.json_store import JSONStore
+from mochi_assistant.storage.json_store import JSONStore
 
 __all__ = ["JSONStore"]

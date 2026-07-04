@@ -10,8 +10,8 @@ from typing import Any, Dict, Optional
 
 import aiohttp
 
-from mochi_agent.logging_config import get_logger
-from mochi_agent.skills.schema import ActionType, Skill
+from mochi_assistant.logging_config import get_logger
+from mochi_assistant.skills.schema import ActionType, Skill
 
 logger = get_logger(__name__)
 

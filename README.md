@@ -54,7 +54,7 @@ pip install poetry
 poetry install
 
 # 启动
-python -m mochi_agent
+python -m mochi_assistant
 ```
 
 ## ⚙️ 配置
@@ -129,8 +129,8 @@ python -m mochi_agent
 ## 🏗️ 项目结构
 
 ```
-mochi_agent/
-├── __main__.py              # python -m mochi_agent 入口
+mochi_assistant/
+├── __main__.py              # python -m mochi_assistant 入口
 ├── config.py                # Pydantic 配置模型 + ConfigManager
 ├── logging_config.py        # 日志配置
 ├── cli/
