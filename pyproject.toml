@@ -35,6 +35,9 @@ dependencies = [
 [project.scripts]
 mochi = "mochi_agent.cli.app:main"
 
+[tool.poetry]
+packages = ["mochi_agent"]
+
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0"
 pytest-asyncio = ">=0.21"
