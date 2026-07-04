@@ -19,6 +19,7 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.layout.processors import BeforeInput
 from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.completion import Completer, Completion
 
 from mochi_agent.agent.core import MochiAgent
 from mochi_agent.config import Config, ConfigManager
@@ -55,6 +56,59 @@ _LOGO_LINES = [
     "  ╚═╝     ╚═╝  ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝",
 ]
 
+# ── 供应商配置 ────────────────────────────────────────────────────────────
+_PROVIDERS = {
+    "deepseek": {
+        "name": "DeepSeek",
+        "base_url": "https://api.deepseek.com",
+        "models": ["deepseek-chat", "deepseek-coder", "deepseek-reasoner"],
+    },
+    "dashscope": {
+        "name": "DashScope (阿里云)",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "models": ["qwen-turbo", "qwen-plus", "qwen-max", "qwen-long"],
+    },
+    "openai": {
+        "name": "OpenAI",
+        "base_url": None,
+        "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
+    },
+}
+
+# ── 斜杠命令定义 ──────────────────────────────────────────────────────────
+_SLASH_COMMANDS = [
+    ("/new",        "创建新会话"),
+    ("/sessions",   "列出会话（上下选择切换）"),
+    ("/save",       "保存当前会话"),
+    ("/model",      "选择模型（交互式）"),
+    ("/skills",     "列出已安装的 SKILL"),
+    ("/mcp",        "显示 MCP Server 列表"),
+    ("/mcp-new",    "添加新的 MCP Server"),
+    ("/memories",   "列出长期记忆"),
+    ("/forget",     "删除指定记忆"),
+    ("/config",     "显示当前配置"),
+    ("/help",       "显示帮助"),
+    ("/exit",       "退出"),
+]
+
+
+class MochiCompleter(Completer):
+    """斜杠命令前缀匹配补全器"""
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        # 仅在输入以 / 开头时触发
+        if not text.startswith("/"):
+            return
+
+        for cmd, desc in _SLASH_COMMANDS:
+            if cmd.startswith(text):
+                yield Completion(
+                    cmd,
+                    start_position=-len(text),
+                    display_meta=desc,
+                )
+
 
 def create_parser() -> argparse.ArgumentParser:
     """创建命令行参数解析器"""
@@ -78,7 +132,13 @@ class MochiREPL:
 
     def __init__(self, agent: MochiAgent):
         self.agent = agent
-        self.console = Console()
+        self.console = Console(force_terminal=True)
+        # 确保输出流使用 UTF-8 编码（Windows 默认可能是 ASCII）
+        if hasattr(self.console.file, 'reconfigure'):
+            try:
+                self.console.file.reconfigure(encoding='utf-8')
+            except Exception:
+                pass
 
     # ── 输入（基于 Application 的带边框输入区） ────────────────────────────
     def _prompt(self) -> str:
@@ -94,7 +154,7 @@ class MochiREPL:
         border_top = Window(height=1, char="─", style=_PT_KHAKI)
         border_bottom = Window(height=1, char="─", style=_PT_KHAKI)
 
-        buf = Buffer(multiline=True)
+        buf = Buffer(multiline=True, completer=MochiCompleter())
 
         input_area = Window(
             height=Dimension(min=1, max=8),
@@ -198,6 +258,81 @@ class MochiREPL:
         self.console.print(Text(f"  v{__version__}  ·  {cfg.provider}/{cfg.model}", style="dim #C8B896"))
         self.console.print(Text(f"  会话: {session.session_id[:12]}  ·  输入 /help 查看命令", style="dim #C8B896"))
 
+    # ── 配置校验与交互式配置 ──────────────────────────────────────────────
+    @staticmethod
+    def _validate_config(cfg) -> tuple[bool, str]:
+        """校验模型配置是否可用
+
+        Returns:
+            (valid, reason) — valid=False 时 reason 说明缺失项
+        """
+        api_key = cfg.api_key
+        if not api_key or api_key.strip() in ("", "sk-your-api-key-here"):
+            return False, "未配置 API Key"
+        if not cfg.provider or not cfg.provider.strip():
+            return False, "未选择供应商"
+        if not cfg.model or cfg.model.strip() in ("", "deepseek-v4-pro"):
+            return False, "未选择模型"
+        return True, ""
+
+    def _setup_model_interactive(self) -> bool:
+        """交互式模型配置（三步：选供应商 → 选模型 → 填 API Key）
+
+        Returns:
+            是否配置成功
+        """
+        self.console.print()
+        self.console.print(Text("  ⚙️  首次使用，请配置模型", style="bold white"))
+        self.console.print()
+
+        # Step 1: 选择供应商
+        provider_items = [
+            (pid, f"{p['name']}  ({pid})") for pid, p in _PROVIDERS.items()
+        ]
+        selected_provider = self._select_from_list("选择供应商", provider_items)
+        if not selected_provider:
+            return False
+
+        provider_info = _PROVIDERS[selected_provider]
+
+        # Step 2: 选择模型
+        models = provider_info["models"]
+        model_items = [(m, m) for m in models]
+        model_items.append(("[custom]", "[ 自定义输入 ]"))
+        selected_model = self._select_from_list("选择模型", model_items)
+
+        if not selected_model:
+            return False
+
+        if selected_model == "[custom]":
+            custom_model = self._prompt_simple("  模型名称")
+            if not custom_model:
+                return False
+            selected_model = custom_model
+
+        # Step 3: 输入 API Key
+        self.console.print()
+        api_key = self._prompt_simple("  API Key", is_password=True)
+        if not api_key:
+            return False
+
+        # 写入配置
+        cfg = self.agent.config.mochi
+        cfg.provider = selected_provider
+        cfg.model = selected_model
+        cfg.api_key = api_key
+        cfg.base_url = provider_info["base_url"]
+
+        self.agent.config_manager.save(self.agent.config)
+        self.agent.reload_config(self.agent.config)
+
+        self.console.print()
+        self.console.print(Text(
+            f"  ✅ 已配置: {provider_info['name']} / {selected_model}",
+            style="bold #A8B8A8",
+        ))
+        return True
+
     # ── 主循环 ────────────────────────────────────────────────────────────
     def run(self):
         """REPL 主循环"""
@@ -223,10 +358,28 @@ class MochiREPL:
 
     # ── 聊天处理 ──────────────────────────────────────────────────────────
     def _handle_chat(self, user_input: str):
-        """处理普通对话"""
-        self._print_user_block(user_input)
+        """处理普通对话（每次热更新配置）"""
+        # 热更新：重新读取 config.json
         try:
-            response = self.agent.chat(user_input)
+            new_config = self.agent.config_manager.reload()
+            self.agent.reload_config(new_config)
+        except Exception as e:
+            logger.warning(f"配置热更新失败: {e}")
+
+        # 校验配置
+        valid, reason = self._validate_config(self.agent.config.mochi)
+        if not valid:
+            self._print_error(f"模型配置不完整: {reason}")
+            self._print_cmd_output("  请使用 /model 命令配置模型，或手动编辑 ~/.mochi/config/config.json")
+            return
+
+        # 清理输入中的控制字符和非法字符
+        clean_input = user_input.encode("utf-8", errors="ignore").decode("utf-8")
+        clean_input = "".join(ch for ch in clean_input if ch == "\n" or ch == "\r" or (ord(ch) >= 32 and ord(ch) != 127))
+
+        self._print_user_block(clean_input)
+        try:
+            response = self.agent.chat(clean_input)
             self._print_bot(response)
         except Exception as e:
             logger.error(f"对话出错: {e}")
@@ -317,36 +470,8 @@ class MochiREPL:
 
     # ── /model — 选择模型 ─────────────────────────────────────────────────
     def _cmd_model(self, _=None):
-        cfg = self.agent.config.mochi
-        providers = {
-            "openai": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
-            "anthropic": ["claude-sonnet-4-20250514", "claude-haiku-4-5-20251001"],
-            "deepseek": ["deepseek-chat", "deepseek-coder", "deepseek-reasoner"],
-            "zhipu": ["glm-4", "glm-4-flash"],
-            "ollama": ["llama3", "qwen2", "mistral"],
-            "google": ["gemini-pro", "gemini-1.5-flash"],
-        }
-
-        # 选择供应商
-        provider_items = [(p, f"{p}  (当前)" if p == cfg.provider else p) for p in providers]
-        selected_provider = self._select_from_list("选择供应商", provider_items)
-        if not selected_provider:
-            return
-
-        # 选择模型
-        models = providers.get(selected_provider, [])
-        model_items = [(m, f"{m}  (当前)" if m == cfg.model else m) for m in models]
-        selected_model = self._select_from_list("选择模型", model_items)
-        if not selected_model:
-            return
-
-        # 更新配置
-        cfg.provider = selected_provider
-        cfg.model = selected_model
-        self.agent._llm = None  # 重置 LLM 缓存
-        self.agent._graph = None  # 重置图缓存
-        self.agent.config_manager.save(self.agent.config)
-        self._print_cmd_output(f"\n  ✅ 模型已切换: {selected_provider}/{selected_model}")
+        """交互式模型配置"""
+        self._setup_model_interactive()
 
     # ── /skills ───────────────────────────────────────────────────────────
     def _cmd_skills(self, _=None):
@@ -487,8 +612,6 @@ class MochiREPL:
     def _select_from_list(self, title: str, items: list[tuple[str, str]]) -> Optional[str]:
         """交互式选择菜单 — 上下箭头选择，回车确认，q 取消
 
-        使用 prompt_toolkit 实现跨平台兼容。
-
         Args:
             title: 菜单标题
             items: [(value, display_label), ...]
@@ -499,62 +622,85 @@ class MochiREPL:
         if not items:
             return None
 
-        from prompt_toolkit import Application
-        from prompt_toolkit.key_binding import KeyBindings as _KB
-        from prompt_toolkit.layout import Layout, HSplit
-        from prompt_toolkit.widgets import TextArea
-        from prompt_toolkit.layout.controls import FormattedTextControl
-        from prompt_toolkit.layout.containers import Window
-
         cursor = [0]
+        total_lines = len(items) + 2  # 标题 + 选项 + 提示
 
-        def get_menu_text():
-            lines = []
-            lines.append([("", f"\n  {title}:\n")])
-            for i, (val, label) in enumerate(items):
+        def _render():
+            """用 Rich 渲染菜单"""
+            self.console.print(f"\n  {title}:", style="bold white")
+            for i, (_, label) in enumerate(items):
                 if i == cursor[0]:
-                    lines.append([("bold #00ff00", f"  ❯ {label}\n")])
+                    self.console.print(f"  ❯ {label}", style="bold #00ff00")
                 else:
-                    lines.append([("dim white", f"    {label}\n")])
-            lines.append([("dim #888888", "  ↑↓ 选择  Enter 确认  q 取消\n")])
-            return lines
+                    self.console.print(f"    {label}", style="dim white")
+            self.console.print("  ↑↓ 选择  Enter 确认  q 取消", style="dim #888888")
 
-        control = FormattedTextControl(get_menu_text)
+        def _redraw():
+            """清除旧菜单并重绘"""
+            # 用 Rich 的控制移动光标上移并清除
+            for _ in range(total_lines):
+                self.console.file.write("\r\033[A\033[2K")
+            self.console.file.flush()
+            _render()
 
-        kb = _KB()
-
-        @kb.add("up")
-        def _(event):
-            cursor[0] = max(0, cursor[0] - 1)
-
-        @kb.add("down")
-        def _(event):
-            cursor[0] = min(len(items) - 1, cursor[0] + 1)
-
-        @kb.add("enter")
-        def _(event):
-            event.app.exit(result=items[cursor[0]][0])
-
-        @kb.add("q")
-        def _(event):
-            event.app.exit(result=None)
-
-        @kb.add("c-c")
-        def _(event):
-            event.app.exit(result=None)
-
-        layout = Layout(Window(control))
-
-        app = Application(
-            layout=layout,
-            key_bindings=kb,
-            full_screen=False,
-            erase_when_done=True,
-        )
+        # 首次渲染
+        _render()
 
         try:
-            return app.run()
-        except Exception:
+            import msvcrt
+            while True:
+                ch = msvcrt.getwch()
+                if ch in ("\x00", "\xe0"):
+                    ch2 = msvcrt.getwch()
+                    if ch2 == "H":    # Up
+                        cursor[0] = max(0, cursor[0] - 1)
+                    elif ch2 == "P":  # Down
+                        cursor[0] = min(len(items) - 1, cursor[0] + 1)
+                elif ch in ("\r", "\n"):
+                    for _ in range(total_lines):
+                        self.console.file.write("\r\033[A\033[2K")
+                    self.console.file.flush()
+                    return items[cursor[0]][0]
+                elif ch in ("q", "\x03"):
+                    for _ in range(total_lines):
+                        self.console.file.write("\r\033[A\033[2K")
+                    self.console.file.flush()
+                    return None
+                else:
+                    continue
+                _redraw()
+        except ImportError:
+            import tty, termios
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                while True:
+                    ch = sys.stdin.read(1)
+                    if ch == "\x1b":
+                        ch2 = sys.stdin.read(1)
+                        if ch2 == "[":
+                            ch3 = sys.stdin.read(1)
+                            if ch3 == "A":
+                                cursor[0] = max(0, cursor[0] - 1)
+                            elif ch3 == "B":
+                                cursor[0] = min(len(items) - 1, cursor[0] + 1)
+                    elif ch in ("\r", "\n"):
+                        for _ in range(total_lines):
+                            self.console.file.write("\r\033[A\033[2K")
+                        self.console.file.flush()
+                        return items[cursor[0]][0]
+                    elif ch in ("q", "\x03"):
+                        for _ in range(total_lines):
+                            self.console.file.write("\r\033[A\033[2K")
+                        self.console.file.flush()
+                        return None
+                    else:
+                        continue
+                    _redraw()
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        except KeyboardInterrupt:
             return None
 
     def _prompt_simple(self, label: str, is_password: bool = False) -> Optional[str]:
@@ -625,7 +771,21 @@ def main(argv: Optional[list] = None) -> None:
             logger.warning(f"会话不存在: {args.continue_session}，创建新会话")
 
     if args.message:
+        # 单条消息模式：也校验配置
+        valid, reason = MochiREPL._validate_config(config.mochi)
+        if not valid:
+            print(f"⚠ 模型配置不完整: {reason}", file=sys.stderr)
+            print("  请先运行 mochi 进入交互式配置", file=sys.stderr)
+            sys.exit(1)
         run_one_shot(agent, args.message)
     else:
         repl = MochiREPL(agent)
+
+        # 启动时校验配置，不通过则进入交互式配置
+        valid, reason = MochiREPL._validate_config(config.mochi)
+        if not valid:
+            configured = repl._setup_model_interactive()
+            if not configured:
+                repl._print_error("未完成配置，部分功能不可用。可随时使用 /model 重新配置。")
+
         repl.run()

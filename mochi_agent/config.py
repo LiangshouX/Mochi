@@ -91,6 +91,11 @@ class ConfigManager:
 
         return self._config
 
+    def reload(self) -> Config:
+        """强制重新从磁盘读取配置文件（热更新）"""
+        self._config = None
+        return self.load()
+
     def _save_default_template(self) -> None:
         """保存默认配置模板到 config.json"""
         template = {
