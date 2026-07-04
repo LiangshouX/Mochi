@@ -33,10 +33,10 @@ dependencies = [
 ]
 
 [project.scripts]
-mochi = "mochi_agent.cli.app:main"
+mochi = "mochi_assistant.cli.app:main"
 
 [tool.poetry]
-packages = ["mochi_agent"]
+packages = [{include = "mochi_assistant"}]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0"

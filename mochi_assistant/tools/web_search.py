@@ -4,7 +4,7 @@
 * File      : web_search.py
 * Function  : 内置网页搜索工具
 """
-from mochi_agent.logging_config import get_logger
+from mochi_assistant.logging_config import get_logger
 
 logger = get_logger(__name__)
 

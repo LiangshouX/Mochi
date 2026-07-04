@@ -433,7 +433,7 @@ Mochi/
 │   └── workflows/
 │       ├── ci.yml         # CI（测试）
 │       └── release.yml    # 发布到 PyPI
-├── mochi_agent/
+├── mochi_assistant/
 ├── scripts/
 ├── pyproject.toml
 └── ...

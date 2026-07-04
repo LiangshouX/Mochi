@@ -21,10 +21,10 @@ from prompt_toolkit.layout.processors import BeforeInput
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
 
-from mochi_agent.agent.core import MochiAgent
-from mochi_agent.config import Config, ConfigManager
-from mochi_agent.logging_config import init_default_logging, get_logger
-from mochi_agent.storage.workspace import ensure_workspace
+from mochi_assistant.agent.core import MochiAgent
+from mochi_assistant.config import Config, ConfigManager
+from mochi_assistant.logging_config import init_default_logging, get_logger
+from mochi_assistant.storage.workspace import ensure_workspace
 
 logger = get_logger(__name__)
 
@@ -717,8 +717,8 @@ class MochiREPL:
     @staticmethod
     def _load_skill_registry():
         try:
-            from mochi_agent.skills.loader import SkillRegistry
-            from mochi_agent.storage.workspace import get_workspace_subdir
+            from mochi_assistant.skills.loader import SkillRegistry
+            from mochi_assistant.storage.workspace import get_workspace_subdir
             skills_dir = get_workspace_subdir("skills")
             return SkillRegistry(skills_dir)
         except Exception as e:

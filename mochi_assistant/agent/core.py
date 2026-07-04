@@ -12,18 +12,18 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
-from mochi_agent.agent.llm import create_llm
-from mochi_agent.agent.prompts import (
+from mochi_assistant.agent.llm import create_llm
+from mochi_assistant.agent.prompts import (
     MEMORY_AUGMENTED_PROMPT,
     SYSTEM_PROMPT,
     format_memory_context,
     format_tools_description,
 )
-from mochi_agent.config import Config
-from mochi_agent.logging_config import get_logger
-from mochi_agent.memory.session import MessageRole, Session, ShortTermMemory
-from mochi_agent.memory.long_term import LongTermMemory
-from mochi_agent.tools import ToolRegistry, get_tool_registry
+from mochi_assistant.config import Config
+from mochi_assistant.logging_config import get_logger
+from mochi_assistant.memory.session import MessageRole, Session, ShortTermMemory
+from mochi_assistant.memory.long_term import LongTermMemory
+from mochi_assistant.tools import ToolRegistry, get_tool_registry
 
 logger = get_logger(__name__)
 

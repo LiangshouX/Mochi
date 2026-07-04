@@ -7,10 +7,10 @@
 import asyncio
 from typing import Any, Dict, List, Optional
 
-from mochi_agent.logging_config import get_logger
-from mochi_agent.mcp.config import MCPServerConfig, MCPConfig
-from mochi_agent.mcp.auth import MCPAuthFactory
-from mochi_agent.tools import ToolRegistry, get_tool_registry
+from mochi_assistant.logging_config import get_logger
+from mochi_assistant.mcp.config import MCPServerConfig, MCPConfig
+from mochi_assistant.mcp.auth import MCPAuthFactory
+from mochi_assistant.tools import ToolRegistry, get_tool_registry
 
 logger = get_logger(__name__)
 
@@ -56,7 +56,7 @@ class MCPClient:
             # 获取认证头
             auth_headers = {}
             if server.auth_type and server.auth_type != "none":
-                from mochi_agent.mcp.config import AuthType
+                from mochi_assistant.mcp.config import AuthType
                 auth_obj = MCPAuthFactory.get_auth(
                     AuthType(server.auth_type),
                     server.auth_config,

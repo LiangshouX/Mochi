@@ -27,20 +27,20 @@ conda activate mochi
 
 ```bash
 # Run the assistant (interactive REPL)
-python -m mochi_agent
+python -m mochi_assistant
 
 # After pip install, use the CLI command directly
 mochi
 
 # Single message mode
-python -m mochi_agent -m "your message here"
+python -m mochi_assistant -m "your message here"
 mochi -m "your message here"
 
 # Continue a specific session
-python -m mochi_agent -c SESSION_ID
+python -m mochi_assistant -c SESSION_ID
 
 # Custom config directory
-python -m mochi_agent --config /path/to/config
+python -m mochi_assistant --config /path/to/config
 
 # Install dependencies (source mode)
 poetry install
@@ -105,7 +105,7 @@ Supported LLM providers: openai, deepseek, dashscope (others via OpenAI-compatib
 Tools are registered via `ToolRegistry` (global singleton from `get_tool_registry()`). Each tool has: name, description, input_schema, handler function, source (builtin or MCP).
 
 To add a new built-in tool:
-1. Create handler function in `mochi_agent/tools/`
+1. Create handler function in `mochi_assistant/tools/`
 2. Register via `get_tool_registry().register(name, description, handler, input_schema)`
 
 ### MCP Integration

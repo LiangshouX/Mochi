@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from mochi_agent.logging_config import get_logger
+from mochi_assistant.logging_config import get_logger
 
 logger = get_logger(__name__)
 

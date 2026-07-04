@@ -8,8 +8,8 @@ from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
 
-from mochi_agent.config import MochiConfig
-from mochi_agent.logging_config import get_logger
+from mochi_assistant.config import MochiConfig
+from mochi_assistant.logging_config import get_logger
 
 logger = get_logger(__name__)
 

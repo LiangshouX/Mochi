@@ -13,8 +13,8 @@ from typing import Optional, List, Dict, Any
 
 from pydantic import BaseModel, Field
 
-from mochi_agent.logging_config import get_logger
-from mochi_agent.storage.workspace import get_workspace_subdir
+from mochi_assistant.logging_config import get_logger
+from mochi_assistant.storage.workspace import get_workspace_subdir
 
 logger = get_logger(__name__)
 
