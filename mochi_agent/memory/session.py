@@ -118,6 +118,8 @@ class ShortTermMemory:
             if session:
                 self._current_session = session
                 return session
+        if self._current_session is not None:
+            return self._current_session
         return self.create_session()
 
     def load_session(self, session_id: str) -> Optional[Session]:
