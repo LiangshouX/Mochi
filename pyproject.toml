@@ -1,13 +1,23 @@
 [project]
-name = "mochi_agent"
+name = "mochi-agent"
 version = "0.1.0"
-description = "Local Personal AI Assistant"
+description = "Mochi — 本地运行的个人 AI 助手，基于 LangGraph 构建"
 authors = [
-    {name = "'LiangshouX'",email = "'xiaoliangshou.bit@gamil.com'"}
+    {name = "LiangshouX", email = "xiaoliangshou.bit@gmail.com"}
 ]
 license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.12"
+keywords = ["ai", "assistant", "langgraph", "langchain", "mcp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "langchain>=0.2.0",
     "langgraph>=0.1.0",
@@ -21,6 +31,9 @@ dependencies = [
     "rich>=13.0",
     "prompt-toolkit>=3.0",
 ]
+
+[project.scripts]
+mochi = "mochi_agent.cli.app:main"
 
 [project.optional-dependencies]
 dev = [

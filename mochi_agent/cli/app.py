@@ -38,6 +38,23 @@ BOT_STYLE = "cyan"
 ERROR_STYLE = "bold red"
 CMD_STYLE = "dim #C8B896"
 
+# ── 莫兰迪配色方案 ──────────────────────────────────────────────────────
+_MORANDI_ROSE = "#C4A882"      # 莫兰迪暖棕/玫瑰
+_MORANDI_KHAKI = "#C8B896"     # 莫兰迪卡其
+_MORANDI_SAGE = "#A8B8A8"      # 莫兰迪灰绿
+_MORANDI_LAVENDER = "#B8A8C8"  # 莫兰迪灰紫
+_MORANDI_BLUE = "#9AABB8"      # 莫兰迪灰蓝
+
+# ── ASCII Art Logo ───────────────────────────────────────────────────────
+_LOGO_LINES = [
+    "  ███╗   ███╗  ██████╗  ██████╗ ██╗  ██╗██╗     █████╗ ██╗",
+    "  ████╗ ████║ ██╔═══██╗██╔═══██╗██║  ██║██║    ██╔══██╗██║",
+    "  ██╔████╔██║ ██║   ██║██║   ██║███████║██║    ███████║██║",
+    "  ██║╚██╔╝██║ ██║   ██║██║   ██║██╔══██║██║    ██╔══██║██║",
+    "  ██║ ╚═╝ ██║ ╚██████╔╝╚██████╔╝██║  ██║███████╗██║  ██║██║",
+    "  ╚═╝     ╚═╝  ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝",
+]
+
 
 def create_parser() -> argparse.ArgumentParser:
     """创建命令行参数解析器"""
@@ -159,13 +176,27 @@ class MochiREPL:
         self.console.print(Text(f"  ⚠ {text}", style=ERROR_STYLE))
 
     # ── Banner ────────────────────────────────────────────────────────────
+    @staticmethod
+    def _build_logo() -> Text:
+        """构建莫兰迪配色的 ASCII Art Logo"""
+        logo = Text()
+        # 莫兰迪色彩渐变：按行循环分配颜色
+        colors = [_MORANDI_ROSE, _MORANDI_KHAKI, _MORANDI_SAGE,
+                  _MORANDI_LAVENDER, _MORANDI_BLUE, _MORANDI_KHAKI]
+        for i, line in enumerate(_LOGO_LINES):
+            if i > 0:
+                logo.append("\n")
+            logo.append(line, style=colors[i % len(colors)])
+        return logo
+
     def _print_banner(self):
         cfg = self.agent.config.mochi
         session = self.agent.get_session()
         self.console.print()
-        self.console.print(Text("  🐾 Mochi AI 助手", style="bold white"))
-        self.console.print(Text(f"  v{__version__}  |  {cfg.provider}/{cfg.model}", style="dim white"))
-        self.console.print(Text(f"  会话: {session.session_id[:12]}  |  输入 /help 查看命令", style="dim white"))
+        self.console.print(self._build_logo())
+        self.console.print()
+        self.console.print(Text(f"  v{__version__}  ·  {cfg.provider}/{cfg.model}", style="dim #C8B896"))
+        self.console.print(Text(f"  会话: {session.session_id[:12]}  ·  输入 /help 查看命令", style="dim #C8B896"))
 
     # ── 主循环 ────────────────────────────────────────────────────────────
     def run(self):
