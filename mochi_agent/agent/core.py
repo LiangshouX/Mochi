@@ -46,6 +46,13 @@ class MochiAgent:
         self._graph = None
         self._llm = None
 
+    def reload_config(self, config: Config) -> None:
+        """热更新配置：替换配置并重置 LLM/Graph 缓存"""
+        self.config = config
+        self._llm = None
+        self._graph = None
+        logger.info("Agent 配置已热更新")
+
     def _get_llm(self):
         """延迟初始化 LLM"""
         if self._llm is None:
