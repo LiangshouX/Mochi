@@ -14,13 +14,11 @@ from mochi_agent.logging_config import get_logger
 logger = get_logger(__name__)
 
 # 供应商 → (LangChain 类路径, 默认模型)
+# 仅内置 DeepSeek / DashScope / OpenAI；其他供应商请使用 OpenAI 兼容模式
 _PROVIDER_MAP: dict[str, tuple[str, str]] = {
     "openai": ("langchain_openai.ChatOpenAI", "gpt-4o"),
-    "anthropic": ("langchain_anthropic.ChatAnthropic", "claude-sonnet-4-20250514"),
-    "ollama": ("langchain_ollama.ChatOllama", "llama3"),
-    "google": ("langchain_google_genai.ChatGoogleGenerativeAI", "gemini-pro"),
     "deepseek": ("langchain_openai.ChatOpenAI", "deepseek-chat"),
-    "zhipu": ("langchain_openai.ChatOpenAI", "glm-4"),
+    "dashscope": ("langchain_openai.ChatOpenAI", "qwen-turbo"),
 }
 
 

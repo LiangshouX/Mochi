@@ -98,7 +98,7 @@ Config is stored at `~/.mochi/config/config.json` with three sections:
 - `security`: allowed_directories, dangerous_commands list
 - `mcp`: MCP server configurations
 
-Supported LLM providers: openai, anthropic, deepseek, zhipu, ollama, google
+Supported LLM providers: openai, deepseek, dashscope (others via OpenAI-compatible mode)
 
 ### Tool System
 
