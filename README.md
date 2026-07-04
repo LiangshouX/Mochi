@@ -30,7 +30,7 @@ conda create -n mochi python=3.12 -y
 conda activate mochi
 
 # 安装
-pip install mochi-agent
+pip install mochi-assistant
 
 # 启动
 mochi
