@@ -17,7 +17,7 @@ logger = get_logger(__name__)
 
 class MochiConfig(BaseModel):
     """Mochi Agent 配置"""
-    provider: str = Field(default="openai", description="LLM 供应商 (openai, anthropic, ollama, deepseek, zhipu)")
+    provider: str = Field(default="openai", description="LLM 供应商 (openai, deepseek, dashscope；其他请用 openai 兼容模式)")
     model: str = Field(default="deepseek-v4-pro", description="模型名称")
     temperature: float = Field(default=0.7, description="LLM 温度")
     max_tokens: int = Field(default=4096, description="LLM 最大 token 长度")

@@ -13,7 +13,7 @@
 
 ## ✨ 功能特性
 
-- **多模型支持** — OpenAI、Anthropic、DeepSeek、智谱、Ollama、Google 等主流 LLM
+- **多模型支持** — DeepSeek、DashScope（阿里云）、OpenAI，其他供应商可通过 OpenAI 兼容模式接入
 - **长期记忆** — 跨会话的持久化记忆系统，支持标签和搜索
 - **MCP 集成** — 通过 Model Context Protocol 连接外部工具服务器
 - **技能系统** — 基于 YAML frontmatter 的 `.md` 技能文件，可扩展
@@ -86,14 +86,13 @@ python -m mochi_agent
 
 ### 支持的 LLM 供应商
 
-| 供应商 | 模型示例 |
-|--------|----------|
-| openai | gpt-4o, gpt-4o-mini, gpt-3.5-turbo |
-| anthropic | claude-sonnet-4-20250514, claude-haiku-4-5-20251001 |
-| deepseek | deepseek-chat, deepseek-coder, deepseek-reasoner |
-| zhipu | glm-4, glm-4-flash |
-| ollama | llama3, qwen2, mistral |
-| google | gemini-pro, gemini-1.5-flash |
+| 供应商 | provider 值 | base_url | 模型示例 |
+|--------|-------------|----------|----------|
+| DeepSeek | `deepseek` | `https://api.deepseek.com` | deepseek-chat, deepseek-coder, deepseek-reasoner |
+| DashScope（阿里云） | `dashscope` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | qwen-turbo, qwen-plus, qwen-max, qwen-long |
+| OpenAI | `openai` | （默认） | gpt-4o, gpt-4o-mini, gpt-4-turbo |
+
+> **OpenAI 兼容模式**：如需使用其他供应商（如 Anthropic、Google、Ollama 等），可将 `provider` 设为 `openai`，并配置对应的 `base_url` 和 `api_key`，即可通过 OpenAI 兼容接口接入。
 
 ## 📖 REPL 命令
 
