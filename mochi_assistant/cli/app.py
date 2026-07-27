@@ -9,7 +9,10 @@ import sys
 from pathlib import Path
 from typing import Optional, List
 
-from rich.console import Console
+from rich.console import Console, Group
+from rich.live import Live
+from rich.markdown import Markdown
+from rich.padding import Padding
 from rich.text import Text
 from prompt_toolkit import Application
 from prompt_toolkit.key_binding import KeyBindings
@@ -21,7 +24,8 @@ from prompt_toolkit.layout.processors import BeforeInput
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
 
-from mochi_assistant.agent.core import MochiAgent
+from mochi_assistant.agent.core import MochiAgent, TurnEvent, TurnEventType
+from mochi_assistant.cli.turn_record import TurnRecord
 from mochi_assistant.config import Config, ConfigManager
 from mochi_assistant.logging_config import init_default_logging, get_logger
 from mochi_assistant.storage.workspace import ensure_workspace
@@ -34,10 +38,13 @@ __version__ = "0.1.0"
 _PT_KHAKI = "#C8B896"  # 莫兰迪浅卡其色
 
 # ── Rich 样式常量 ────────────────────────────────────────────────────────
-USER_STYLE = "dim white on #2a2a2a"
+USER_STYLE = "bold white on #3a3a3a"
+USER_MARKER = "❯"
 BOT_STYLE = "cyan"
 ERROR_STYLE = "bold red"
 CMD_STYLE = "dim #C8B896"
+PROCESS_STYLE = "dim #8a8a7a"       # 过程信息（工具调用等）弱样式
+THINKING_STYLE = "dim #B8A8C8"      # 思考信息弱样式（莫兰迪灰紫）
 
 # ── 莫兰迪配色方案 ──────────────────────────────────────────────────────
 _MORANDI_ROSE = "#C4A882"      # 莫兰迪暖棕/玫瑰
@@ -75,39 +82,74 @@ _PROVIDERS = {
     },
 }
 
-# ── 斜杠命令定义 ──────────────────────────────────────────────────────────
-_SLASH_COMMANDS = [
-    ("/new",        "创建新会话"),
-    ("/sessions",   "列出会话（上下选择切换）"),
-    ("/save",       "保存当前会话"),
-    ("/model",      "选择模型（交互式）"),
-    ("/skills",     "列出已安装的 SKILL"),
-    ("/mcp",        "显示 MCP Server 列表"),
-    ("/mcp-new",    "添加新的 MCP Server"),
-    ("/memories",   "列出长期记忆"),
-    ("/forget",     "删除指定记忆"),
-    ("/config",     "显示当前配置"),
-    ("/help",       "显示帮助"),
-    ("/exit",       "退出"),
-]
+# ── 斜杠命令注册表（补全 / 分发 / 别名的单一数据源） ─────────────────────
+COMMAND_REGISTRY = {
+    "/new":       {"desc": "创建新会话",              "aliases": []},
+    "/sessions":  {"desc": "列出会话（上下选择切换）", "aliases": []},
+    "/save":      {"desc": "保存当前会话",            "aliases": []},
+    "/model":     {"desc": "选择模型（交互式）",       "aliases": []},
+    "/skills":    {"desc": "列出已安装的 SKILL",      "aliases": ["/skill"]},
+    "/mcp":       {"desc": "显示 MCP Server 列表",    "aliases": []},
+    "/mcp-new":   {"desc": "添加新的 MCP Server",     "aliases": []},
+    "/memories":  {"desc": "列出长期记忆",            "aliases": []},
+    "/forget":    {"desc": "删除指定记忆 /forget KEY", "aliases": []},
+    "/config":    {"desc": "显示当前配置",            "aliases": []},
+    "/debug":     {"desc": "切换过程详情内联显示",     "aliases": []},
+    "/help":      {"desc": "显示帮助",               "aliases": []},
+    "/exit":      {"desc": "退出",                   "aliases": ["/quit"]},
+}
 
 
 class MochiCompleter(Completer):
-    """斜杠命令前缀匹配补全器"""
+    """斜杠命令前缀匹配补全器（内置命令 + 技能命令）"""
+
+    def __init__(self, extra_commands: Optional[List[tuple]] = None):
+        # extra_commands: [(command, desc), ...] — 来自技能注册表
+        self._extra = extra_commands or []
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
-        # 仅在输入以 / 开头时触发
-        if not text.startswith("/"):
+        # 仅在单行且以 / 开头时触发（多行正文不补全）
+        if not text.startswith("/") or "\n" in text:
             return
 
-        for cmd, desc in _SLASH_COMMANDS:
+        for cmd, info in COMMAND_REGISTRY.items():
             if cmd.startswith(text):
                 yield Completion(
                     cmd,
                     start_position=-len(text),
-                    display_meta=desc,
+                    display_meta=info["desc"],
                 )
+            for alias in info["aliases"]:
+                if alias.startswith(text):
+                    yield Completion(
+                        alias,
+                        start_position=-len(text),
+                        display_meta=f"(别名 → {cmd})",
+                    )
+
+        for cmd, desc in self._extra:
+            if cmd.startswith(text):
+                yield Completion(
+                    cmd,
+                    start_position=-len(text),
+                    display_meta=desc or "技能",
+                )
+
+
+# Ctrl+O（展开上一回合明细）哨兵值：_prompt 返回该值表示按下了 Ctrl+O
+_CTRL_O_SENTINEL = "\x00__CTRL_O__\x00"
+
+
+def _summarize_args(args: dict, max_len: int = 60) -> str:
+    """把工具入参摘要成一行短文本"""
+    try:
+        text = ", ".join(f"{k}={v!r}" for k, v in list(args.items())[:3])
+    except Exception:
+        text = str(args)
+    if len(text) > max_len:
+        text = text[:max_len] + "…"
+    return text
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -119,6 +161,8 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("-m", "--message", type=str, help="发送单条消息并退出")
     parser.add_argument("-c", "--continue-session", type=str, metavar="SESSION_ID", help="继续指定的会话")
     parser.add_argument("--config", type=str, help="自定义配置目录路径（默认 ~/.mochi/）")
+    parser.add_argument("-v", "--verbose", action="count", default=0,
+                        help="提升日志详细度（-v 显示 INFO，-vv 显示 DEBUG）")
     parser.add_argument("--version", action="version", version=f"mochi {__version__}")
     return parser
 
@@ -133,6 +177,25 @@ class MochiREPL:
     def __init__(self, agent: MochiAgent):
         self.agent = agent
         self.console = Console(force_terminal=True)
+        # 上一回合的过程记录（供 Ctrl+O 展开明细）
+        self._last_turn: Optional[TurnRecord] = None
+        # /debug 开启后，每回合结束内联展示过程明细
+        self._show_debug_inline: bool = False
+        # Ctrl+O 打断输入时暂存的残文（下次 _prompt 回填）
+        self._pending_input: str = ""
+        # 技能注册表缓存（启动时加载一次，供命令分发与补全复用）
+        self._skill_registry = self._load_skill_registry()
+        if self._skill_registry is not None:
+            try:
+                self._skill_registry.load_all()
+            except Exception as e:
+                logger.warning(f"加载技能失败: {e}")
+        # 斜杠命令补全器（内置命令 + 技能命令）
+        extra_cmds = []
+        if self._skill_registry is not None:
+            for skill in self._skill_registry.list_skills():
+                extra_cmds.append((skill.command, skill.description or "技能"))
+        self._completer = MochiCompleter(extra_commands=extra_cmds)
         # 确保输出流使用 UTF-8 编码（Windows 默认可能是 ASCII）
         if hasattr(self.console.file, 'reconfigure'):
             try:
@@ -141,12 +204,26 @@ class MochiREPL:
                 pass
 
     # ── 输入（基于 Application 的带边框输入区） ────────────────────────────
-    def _prompt(self) -> str:
-        """带莫兰迪卡其色实线边框的多行输入区（动态适配终端宽度）"""
+    def _prompt(self, default: str = "") -> str:
+        """带莫兰迪卡其色实线边框的多行输入区（动态适配终端宽度）
+
+        Args:
+            default: 预填文本（用于 Ctrl+O 展开明细后回填之前的输入残文）
+
+        Returns:
+            用户输入文本；按下 Ctrl+O 时返回 _CTRL_O_SENTINEL
+        """
         # ── 样式 ──
         style = Style.from_dict({
             "input-text": "#ffffff",
             "cursor": "bg:#ffffff #000000",
+            # 补全菜单（莫兰迪配色）
+            "completion-menu": "bg:#2f2f2f #C8B896",
+            "completion-menu.completion.current": "bg:#A8B8A8 #000000",
+            "completion-menu.meta": "bg:#2f2f2f #8a8a7a",
+            "completion-menu.meta.current": "bg:#A8B8A8 #333333",
+            "completion-menu.scrollbar.background": "bg:#2f2f2f",
+            "completion-menu.scrollbar.button": "bg:#C8B896",
         })
 
         # ── 布局：上边框 ─ 输入区(≤8行) ─ 下边框 ──
@@ -154,7 +231,13 @@ class MochiREPL:
         border_top = Window(height=1, char="─", style=_PT_KHAKI)
         border_bottom = Window(height=1, char="─", style=_PT_KHAKI)
 
-        buf = Buffer(multiline=True, completer=MochiCompleter())
+        buf = Buffer(
+            multiline=True,
+            completer=self._completer,
+            complete_while_typing=True,  # 输入 / 后自动弹出补全菜单
+        )
+        if default:
+            buf.text = default  # 光标自动置于文末
 
         input_area = Window(
             height=Dimension(min=1, max=8),
@@ -193,6 +276,12 @@ class MochiREPL:
             else:
                 raise KeyboardInterrupt
 
+        @kb.add("c-o")
+        def _(event):
+            # Ctrl+O：展开上一回合明细。暂存输入残文，主循环打印明细后回填
+            self._pending_input = event.app.current_buffer.text
+            event.app.exit(result=_CTRL_O_SENTINEL)
+
         # ── 构建 Application ──
         app = Application(
             layout=layout,
@@ -214,16 +303,19 @@ class MochiREPL:
             raise
 
     def _print_user_block(self, text: str):
-        """用户输入 — 浅灰色背景块"""
+        """用户输入 — 亮灰底粗体块，首行带 ❯ 标记"""
         lines = text.split("\n")
-        formatted = "\n".join(f"  {line}" for line in lines)
+        formatted = "\n".join(
+            f"  {USER_MARKER} {line}" if i == 0 else f"    {line}"
+            for i, line in enumerate(lines)
+        )
         self.console.print()
         self.console.print(Text(formatted, style=USER_STYLE))
 
     def _print_bot(self, text: str):
-        """AI 回复 — 青色"""
+        """AI 回复 — Markdown 排版渲染"""
         self.console.print()
-        self.console.print(Text(f"  {text}", style=BOT_STYLE))
+        self.console.print(Padding(Markdown(text), (0, 0, 0, 2)))
 
     def _print_cmd_output(self, text: str):
         """命令输出"""
@@ -338,14 +430,27 @@ class MochiREPL:
         """REPL 主循环"""
         self._print_banner()
 
+        pending = ""
         while True:
             # ── 输入区（边框 + 多行输入，Application 内自动渲染） ──
             try:
-                user_input = self._prompt()
+                user_input = self._prompt(default=pending)
             except (EOFError, KeyboardInterrupt):
                 self.console.print()
                 self.console.print(Text("  再见！👋", style="bold white"))
                 break
+            pending = ""
+
+            # Ctrl+O：展开上一回合的过程明细，随后回填残文继续输入
+            if user_input == _CTRL_O_SENTINEL:
+                pending = self._pending_input
+                self._pending_input = ""
+                if self._last_turn and self._last_turn.has_detail():
+                    self.console.print()
+                    self.console.print(self._last_turn.render_detail())
+                else:
+                    self._print_cmd_output("\n  (暂无上一轮对话的过程详情)")
+                continue
 
             if not user_input:
                 continue
@@ -358,11 +463,13 @@ class MochiREPL:
 
     # ── 聊天处理 ──────────────────────────────────────────────────────────
     def _handle_chat(self, user_input: str):
-        """处理普通对话（每次热更新配置）"""
-        # 热更新：重新读取 config.json
+        """处理普通对话（配置文件变化时才热更新）"""
+        # 条件热更新：仅当 config.json 发生变化时重新加载
         try:
-            new_config = self.agent.config_manager.reload()
-            self.agent.reload_config(new_config)
+            new_config = self.agent.config_manager.reload_if_changed()
+            if new_config is not None:
+                self.agent.reload_config(new_config)
+                logger.info("检测到配置变化，Agent 配置已热更新")
         except Exception as e:
             logger.warning(f"配置热更新失败: {e}")
 
@@ -378,12 +485,89 @@ class MochiREPL:
         clean_input = "".join(ch for ch in clean_input if ch == "\n" or ch == "\r" or (ord(ch) >= 32 and ord(ch) != 127))
 
         self._print_user_block(clean_input)
+
+        # ── 流式对话渲染 ────────────────────────────────────────────────
+        # 过程信息（工具调用/思考）以弱样式摘要行折叠显示；回复先逐 token
+        # 流出纯文本，回合结束后整体替换为 Markdown 排版
+        turn_record = TurnRecord(user_input=clean_input)
+        self._last_turn = turn_record
+        process_lines: List[Text] = []   # 折叠的过程摘要行
+        token_buffer = ""                # 累积的回复文本
+        thinking_buffer = ""             # 累积的思考文本
+
+        def _response_part() -> Text:
+            if token_buffer:
+                return Text("  " + token_buffer, style=BOT_STYLE)
+            if thinking_buffer:
+                return Text("  ⏳ 思考中…", style=THINKING_STYLE)
+            return Text("  ⏳ …", style=PROCESS_STYLE)
+
+        def _build_display(response_renderable) -> Group:
+            parts: list = list(process_lines)
+            if thinking_buffer:
+                parts.append(Text(
+                    f"  💭 已思考 {len(thinking_buffer)} 字 · Ctrl+O 展开",
+                    style=THINKING_STYLE,
+                ))
+            parts.append(response_renderable)
+            return Group(*parts)
+
         try:
-            response = self.agent.chat(clean_input)
-            self._print_bot(response)
+            with Live(Text(""), console=self.console, refresh_per_second=10, transient=False) as live:
+                for event in self.agent.chat_stream(clean_input):
+                    if event.type == TurnEventType.TOKEN:
+                        token_buffer += event.content
+                        live.update(_build_display(_response_part()))
+                    elif event.type == TurnEventType.THINKING:
+                        thinking_buffer += event.content
+                        turn_record.thinking_text += event.content
+                        live.update(_build_display(_response_part()))
+                    elif event.type == TurnEventType.TOOL_CALL_START:
+                        turn_record.add_tool_event(event.tool_name, event.tool_args)
+                        process_lines.append(Text(
+                            f"  ⏺ 调用工具 {event.tool_name}({_summarize_args(event.tool_args)}) …",
+                            style=PROCESS_STYLE,
+                        ))
+                        live.update(_build_display(_response_part()))
+                    elif event.type == TurnEventType.TOOL_RESULT:
+                        turn_record.record_tool_result(event.content)
+                        if process_lines:
+                            elapsed = turn_record.last_tool_elapsed()
+                            process_lines[-1] = Text(
+                                f"  ⏺ 调用工具 {event.tool_name} … ok {elapsed:.1f}s",
+                                style=PROCESS_STYLE,
+                            )
+                        live.update(_build_display(_response_part()))
+                    elif event.type == TurnEventType.ERROR:
+                        raise event.error
+                    # DONE：落到下面的最终渲染
+
+                # 最终渲染：回复区替换为 Markdown 排版（留在屏幕上）
+                final_parts: list = list(process_lines)
+                if thinking_buffer:
+                    final_parts.append(Text(
+                        f"  💭 已思考 {len(thinking_buffer)} 字 · Ctrl+O 展开",
+                        style=THINKING_STYLE,
+                    ))
+                if token_buffer:
+                    final_parts.append(Padding(Markdown(token_buffer), (0, 0, 0, 2)))
+                live.update(Group(*final_parts) if final_parts else Text(""))
+        except KeyboardInterrupt:
+            # Ctrl+C 中断：保留已流出的内容
+            if token_buffer:
+                self.console.print(Text("  " + token_buffer, style="dim"))
+            self._print_error("对话已中断")
+            return
         except Exception as e:
             logger.error(f"对话出错: {e}")
             self._print_error(str(e))
+            return
+
+        turn_record.final_response = token_buffer
+
+        # /debug 模式：内联展示本回合过程明细
+        if self._show_debug_inline and turn_record.has_detail():
+            self.console.print(turn_record.render_detail())
 
     # ══════════════════════════════════════════════════════════════════════
     #  斜杠命令处理
@@ -396,26 +580,34 @@ class MochiREPL:
         args = parts[1] if len(parts) > 1 else ""
 
         dispatch = {
-            "/exit": self._cmd_exit, "/quit": self._cmd_exit,
+            "/exit": self._cmd_exit,
             "/new": self._cmd_new,
             "/sessions": self._cmd_sessions,
             "/save": self._cmd_save,
             "/model": self._cmd_model,
             "/skills": self._cmd_skills,
-            "/skill": self._cmd_skills,
             "/mcp": self._cmd_mcp,
             "/mcp-new": self._cmd_mcp_new,
             "/memories": self._cmd_memories,
             "/forget": lambda _: self._cmd_forget(args),
             "/config": self._cmd_config,
+            "/debug": self._cmd_debug,
             "/help": self._cmd_help,
         }
 
-        handler = dispatch.get(cmd)
+        # 别名解析（如 /quit → /exit，/skill → /skills）
+        resolved = cmd
+        for canonical, info in COMMAND_REGISTRY.items():
+            if cmd == canonical or cmd in info["aliases"]:
+                resolved = canonical
+                break
+
+        handler = dispatch.get(resolved)
         if handler:
             handler(args)
         else:
-            self._print_cmd_output(f"\n  ❌ 未知命令: {cmd}。输入 /help 查看可用命令。")
+            # 兜底：尝试匹配已安装的技能命令（如 /commit）
+            self._try_skill_command(cmd, args)
 
     # ── /exit ─────────────────────────────────────────────────────────────
     def _cmd_exit(self, _=None):
@@ -475,7 +667,7 @@ class MochiREPL:
 
     # ── /skills ───────────────────────────────────────────────────────────
     def _cmd_skills(self, _=None):
-        registry = self._load_skill_registry()
+        registry = self._skill_registry
         if not registry:
             self._print_cmd_output("\n  ⚠️ 技能注册表加载失败")
             return
@@ -485,10 +677,60 @@ class MochiREPL:
             return
         lines = ["\n  🎯 已安装的 SKILL:"]
         for s in skills:
-            action_type = s.metadata.get("ActionType", "RESPONSE")
+            action_type = s.action.type.value
             desc = (s.description or "无描述")[:45]
-            lines.append(f"    {s.name:<22} [{action_type:<10}] {desc}")
+            lines.append(f"    {s.command:<14} {s.name:<18} [{action_type:<8}] {desc}")
         self._print_cmd_output("\n".join(lines))
+
+    # ── 技能命令执行 ─────────────────────────────────────────────────────
+    def _try_skill_command(self, cmd: str, args: str) -> bool:
+        """尝试匹配并执行技能命令；未匹配时提示未知命令
+
+        Args:
+            cmd: 斜杠命令（如 /commit）
+            args: 命令参数
+
+        Returns:
+            是否匹配到技能
+        """
+        skill = self._skill_registry.get(cmd) if self._skill_registry else None
+        if skill is None:
+            self._print_cmd_output(f"\n  ❌ 未知命令: {cmd}。输入 /help 查看可用命令。")
+            return False
+        if not skill.enabled:
+            self._print_error(f"技能 {cmd} 已被禁用")
+            return True
+
+        # 按参数定义顺序解析位置参数
+        arguments = {}
+        if args:
+            params = getattr(skill, "_parameters", []) or []
+            for i, value in enumerate(args.split()):
+                if i < len(params):
+                    arguments[params[i].get("name", f"arg{i}")] = value
+                else:
+                    arguments.setdefault("_extra", []).append(value)
+
+        self._print_cmd_output(f"\n  ⏺ 使用技能 {cmd}")
+        try:
+            from mochi_assistant.skills.executor import execute_skill
+            from mochi_assistant.skills.schema import ActionType
+            result = execute_skill(skill, arguments=arguments, body=getattr(skill, "_body", ""))
+        except NotImplementedError as e:
+            self._print_error(f"技能执行暂未实现: {e}")
+            return True
+        except Exception as e:
+            logger.error(f"技能执行失败: {e}")
+            self._print_error(f"技能执行失败: {e}")
+            return True
+
+        if skill.action.type == ActionType.RESPONSE:
+            # RESPONSE：渲染后的指令正文作为本轮用户消息交给 Agent（走流式对话）
+            self._handle_chat(result)
+        else:
+            # SHELL / HTTP / FUNCTION：弱样式展示执行结果
+            self._print_cmd_output("\n" + (result or "(无输出)"))
+        return True
 
     # ── /mcp — 列出 MCP Server ───────────────────────────────────────────
     def _cmd_mcp(self, _=None):
@@ -586,6 +828,13 @@ class MochiREPL:
         ]
         self._print_cmd_output("\n".join(lines))
 
+    # ── /debug ───────────────────────────────────────────────────────────
+    def _cmd_debug(self, _=None):
+        """切换过程明细内联显示（工具调用/思考内容）"""
+        self._show_debug_inline = not self._show_debug_inline
+        state = "开启" if self._show_debug_inline else "关闭"
+        self._print_cmd_output(f"\n  🔧 过程详情内联显示: {state}（Ctrl+O 可随时展开上一回合明细）")
+
     # ── /help ─────────────────────────────────────────────────────────────
     def _cmd_help(self, _=None):
         help_text = """
@@ -601,8 +850,11 @@ class MochiREPL:
     /memories     列出长期记忆
     /forget KEY   删除指定记忆
     /config       显示当前配置
+    /debug        切换过程详情内联显示
     /help         显示帮助
-    /exit         退出"""
+    /exit         退出
+
+  ⌨️  快捷键:  Ctrl+O 展开上一回合明细  ·  Alt+Enter 换行  ·  行尾 \\ 续行"""
         self._print_cmd_output(help_text)
 
     # ══════════════════════════════════════════════════════════════════════
@@ -744,12 +996,27 @@ def run_one_shot(agent: MochiAgent, message: str) -> None:
 def main(argv: Optional[list] = None) -> None:
     """CLI 主入口"""
     parser = create_parser()
+
+    # Windows 控制台默认可能是 GBK，统一切到 UTF-8，避免 emoji 等字符输出报错
+    # （需在 parse_args 之前，--help/--version 的输出也走这里）
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
     args = parser.parse_args(argv)
 
-    init_default_logging()
-
+    # 先准备工作区，再初始化日志（确保文件日志落到 ~/.mochi/logs/）
     workspace_dir = Path(args.config) if args.config else None
     workspace = ensure_workspace(workspace_dir)
+
+    # 控制台日志级别：默认 WARNING，-v → INFO，-vv+ → DEBUG
+    import logging as _logging
+    console_level = {0: _logging.WARNING, 1: _logging.INFO}.get(args.verbose, _logging.DEBUG)
+    init_default_logging(workspace, console_level=console_level)
+
     logger.info(f"工作区: {workspace}")
 
     config_manager = ConfigManager(workspace)
@@ -762,6 +1029,13 @@ def main(argv: Optional[list] = None) -> None:
         logger.error(f"Agent 初始化失败: {e}")
         print(f"⚠ Agent 初始化失败: {e}", file=sys.stderr)
         sys.exit(1)
+
+    # 连接配置中的 MCP 服务器（失败非致命，不阻断启动）
+    try:
+        from mochi_assistant.mcp.client import connect_mcp_servers_sync
+        connect_mcp_servers_sync(config.mcp, agent.tool_registry)
+    except Exception as e:
+        logger.warning(f"MCP 启动失败（非致命）: {e}")
 
     if args.continue_session:
         session = agent.get_session(args.continue_session)

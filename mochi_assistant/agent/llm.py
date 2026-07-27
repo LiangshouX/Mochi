@@ -53,7 +53,7 @@ def create_llm(config: MochiConfig) -> BaseChatModel:
 
     class_path, default_model = _PROVIDER_MAP[provider]
     model = config.model or default_model
-    logger.info(f"正在初始化 LLM: provider={provider}, model={model}")
+    logger.debug(f"正在初始化 LLM: provider={provider}, model={model}")
 
     try:
         llm_class = _import_class(class_path)
@@ -64,10 +64,13 @@ def create_llm(config: MochiConfig) -> BaseChatModel:
         )
 
     # 构建通用参数
+    # streaming=True：invoke() 仍返回完整消息（向后兼容），同时会发出逐 token
+    # 回调，langgraph 的 stream_mode="messages" 依赖这些回调捕获流式事件
     kwargs = {
         "model": model,
         "temperature": config.temperature,
         "max_tokens": config.max_tokens,
+        "streaming": True,
     }
 
     # API key
@@ -79,5 +82,5 @@ def create_llm(config: MochiConfig) -> BaseChatModel:
         kwargs["base_url"] = config.base_url
 
     llm = llm_class(**kwargs)
-    logger.info(f"LLM 初始化成功: {provider}/{model}")
+    logger.debug(f"LLM 初始化成功: {provider}/{model}")
     return llm

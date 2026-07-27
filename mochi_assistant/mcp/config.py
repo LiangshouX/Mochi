@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 class AuthType(str, Enum):
     """认证类型枚举"""
+    NONE = "none"
     API_KEY = "api_key"
     BEARER = "bearer"
     OAUTH2 = "oauth2"

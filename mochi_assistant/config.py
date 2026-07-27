@@ -62,6 +62,7 @@ class ConfigManager:
         self.config_dir = workspace_dir / "config"
         self.config_file = self.config_dir / "config.json"
         self._config: Optional[Config] = None
+        self._last_mtime: Optional[float] = None
 
     def ensure_config_dir(self):
         """ 确保配置文件地址存在 """
@@ -79,7 +80,8 @@ class ConfigManager:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 self._config = Config(**data)
-                logger.info(f"加载配置文件 {self.config_file} 成功!")
+                self._last_mtime = self.config_file.stat().st_mtime
+                logger.debug(f"加载配置文件 {self.config_file} 成功!")
             except Exception as e:
                 logger.error(f"加载配置文件 {self.config_file} 失败: {e}")
                 self._config = Config()
@@ -87,6 +89,10 @@ class ConfigManager:
             # 首次运行：创建默认配置模板
             self._config = Config()
             self._save_default_template()
+            try:
+                self._last_mtime = self.config_file.stat().st_mtime
+            except OSError:
+                pass
             logger.info("配置文件不存在，已创建默认配置文件")
 
         return self._config
@@ -95,6 +101,22 @@ class ConfigManager:
         """强制重新从磁盘读取配置文件（热更新）"""
         self._config = None
         return self.load()
+
+    def reload_if_changed(self) -> Optional[Config]:
+        """仅当配置文件 mtime 发生变化时重新加载（热更新）
+
+        Returns:
+            配置发生变化时返回新的 Config，未变化返回 None
+        """
+        if not self.config_file.exists():
+            return None
+        try:
+            mtime = self.config_file.stat().st_mtime
+        except OSError:
+            return None
+        if self._last_mtime is not None and mtime == self._last_mtime:
+            return None
+        return self.reload()
 
     def _save_default_template(self) -> None:
         """保存默认配置模板到 config.json"""
@@ -142,6 +164,7 @@ class ConfigManager:
             data = self._config.model_dump(mode='json')
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            self._last_mtime = self.config_file.stat().st_mtime
             logger.info(f"配置已保存到 {self.config_file}")
             return True
         except Exception as e:

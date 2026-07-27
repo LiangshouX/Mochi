@@ -80,6 +80,8 @@ class ToolRegistry:
 
     def get_langchain_tools(self) -> list:
         """获取 LangChain 格式的工具列表（用于 agent 图）"""
+        import asyncio
+
         from langchain_core.tools import StructuredTool
 
         lc_tools = []
@@ -88,12 +90,21 @@ class ToolRegistry:
                 continue
 
             # 创建 LangChain StructuredTool
-            lc_tool = StructuredTool.from_function(
-                func=tool_def.handler,
-                name=tool_def.name,
-                description=tool_def.description,
-                args_schema=None,  # TODO: 从 input_schema 生成
-            )
+            # async handler（MCP 工具）必须传 coroutine，否则调用只会得到未 await 的协程
+            if asyncio.iscoroutinefunction(tool_def.handler):
+                lc_tool = StructuredTool.from_function(
+                    coroutine=tool_def.handler,
+                    name=tool_def.name,
+                    description=tool_def.description,
+                    args_schema=None,  # TODO: 从 input_schema 生成
+                )
+            else:
+                lc_tool = StructuredTool.from_function(
+                    func=tool_def.handler,
+                    name=tool_def.name,
+                    description=tool_def.description,
+                    args_schema=None,  # TODO: 从 input_schema 生成
+                )
             lc_tools.append(lc_tool)
         return lc_tools
 
@@ -137,3 +148,30 @@ def get_tool_registry() -> ToolRegistry:
     if _registry is None:
         _registry = ToolRegistry()
     return _registry
+
+
+def register_builtin_tools(security_config=None) -> ToolRegistry:
+    """注册所有内置工具到全局注册表（幂等）
+
+    Args:
+        security_config: 可选的安全配置（SecurityConfig），传给 shell 工具
+
+    Returns:
+        全局工具注册表
+    """
+    registry = get_tool_registry()
+
+    # 已注册过则跳过（注册表为全局单例）
+    if registry.get("file_read") is not None:
+        return registry
+
+    from mochi_assistant.tools.file_ops import register_file_tools
+    from mochi_assistant.tools.shell import register_shell_tools
+    from mochi_assistant.tools.web_search import register_web_tools
+
+    register_file_tools(registry)
+    register_shell_tools(registry, security_config=security_config)
+    register_web_tools(registry)
+
+    logger.info(f"已注册 {len(registry.list_tools())} 个内置工具")
+    return registry

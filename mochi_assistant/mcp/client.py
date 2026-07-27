@@ -176,3 +176,64 @@ class MCPClient:
     def list_connected(self) -> List[str]:
         """列出已连接的服务器 ID"""
         return [sid for sid, connected in self._connected.items() if connected]
+
+
+def build_mcp_client_from_config(
+        config_mcp,
+        tool_registry: Optional[ToolRegistry] = None,
+) -> MCPClient:
+    """从主配置（config.py 的 MCPConfig，servers 为 dict）构建 MCPClient
+
+    主配置与 mcp/config.py 的 MCPConfig 是两个不兼容的类型，这里做转换：
+    逐个把 dict 形式的 server 配置转成 MCPServerConfig（pydantic 会自动
+    把 auth_type 字符串强转为 AuthType 枚举）。单个 server 转换失败只记
+    warning 并跳过，不影响其余 server。
+
+    Args:
+        config_mcp: 主配置中的 MCPConfig（config.mcp）
+        tool_registry: 可选的工具注册表，默认使用全局注册表
+    """
+    client_config = MCPConfig()
+    for name, srv in (config_mcp.servers or {}).items():
+        try:
+            server_config = MCPServerConfig(
+                name=srv.get("name", name),
+                url=srv.get("url", ""),
+                auth_type=srv.get("auth_type", "api_key"),
+                auth_config=srv.get("auth_config", {}),
+                enabled=srv.get("enabled", True),
+            )
+            client_config.add_server(server_config)
+        except Exception as e:
+            logger.warning(f"跳过无效的 MCP 服务器配置 '{name}': {e}")
+
+    return MCPClient(client_config, tool_registry=tool_registry)
+
+
+def connect_mcp_servers_sync(
+        config_mcp,
+        tool_registry: Optional[ToolRegistry] = None,
+) -> Optional[MCPClient]:
+    """同步启动 MCP 连接（供 CLI main 调用）。失败非致命，仅记日志。
+
+    Args:
+        config_mcp: 主配置中的 MCPConfig（config.mcp）
+        tool_registry: 可选的工具注册表
+
+    Returns:
+        连接完成后的 MCPClient；无配置或连接失败返回 None
+    """
+    if not (config_mcp.servers or {}):
+        return None
+
+    client = build_mcp_client_from_config(config_mcp, tool_registry=tool_registry)
+    try:
+        asyncio.run(client.connect_all())
+    except Exception as e:
+        logger.warning(f"MCP 服务器连接失败（非致命）: {e}")
+        return None
+
+    connected = client.list_connected()
+    if connected:
+        logger.info(f"MCP 连接完成: {len(connected)} 个服务器已连接")
+    return client
